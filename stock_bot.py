@@ -1,194 +1,179 @@
-import pandas as pd
 import yfinance as yf
-from rich.live import Live
-from rich.table import Table
-from rich.console import Console
-from datetime import datetime, timezone
+import datetime
+import pytz
 import time
-import sys
-import io
-import winsound  # ✅ Sunete pe Windows
-from plyer import notification  # ✅ Notificări desktop
-
-# Setare output UTF-8
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+import os
+from plyer import notification
+from rich.console import Console
+from rich.table import Table
+from playsound import playsound
 
 console = Console()
 
-# ✅ Funcții pentru sunet
+# Sunete pentru BUY și SELL
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+BUY_SOUND = os.path.join(BASE_DIR, "buy.wav")
+SELL_SOUND = os.path.join(BASE_DIR, "sell.wav")
+
+# Configurație interval și lookback
+INTERVAL = "5m"
+LOOKBACK = 15  # minute
+
+# Încarcă tickerele din fișier
+TICKERS_FILE = "tickers.txt"
+def load_tickers():
+    try:
+        with open(TICKERS_FILE, "r") as f:
+            return [line.strip() for line in f if line.strip()]
+    except Exception as e:
+        print(f"Eroare la citirea fisierului de tickere: {e}")
+        return []
 
 def play_buy_sound():
-    winsound.Beep(750, 300)  # Sunet mai lung și mai puternic
+    try:
+        playsound(BUY_SOUND)
+    except Exception as e:
+        print(f"Eroare sunet BUY: {e}")
 
 def play_sell_sound():
-    winsound.Beep(450, 300)
-
-# ✅ Funcție notificare
-
-def notify(title, message):
     try:
-        notification.notify(
-            title=title,
-            message=message,
-            timeout=5
-        )
+        playsound(SELL_SOUND)
     except Exception as e:
-        console.log(f"[red]Eroare notificare:[/red] {e}")
+        print(f"Eroare sunet SELL: {e}")
 
-def classify_candle(open_price, close_price, high, low):
-    direction = "Bullish" if close_price > open_price else "Bearish"
-    body = abs(close_price - open_price)
-    upper_shadow = high - max(open_price, close_price)
-    lower_shadow = min(open_price, close_price) - low
-    total_range = high - low if high - low != 0 else 1
-    body_pct = round((body / total_range) * 100, 2)
-    upper_pct = round((upper_shadow / total_range) * 100, 2)
-    lower_pct = round((lower_shadow / total_range) * 100, 2)
-
-    is_doji = body_pct < 10 and upper_pct > 30 and lower_pct > 30
-    is_hammer = body_pct < 25 and lower_pct > 50 and upper_pct < 25 and direction == "Bullish"
-    is_inverted_hammer = body_pct < 25 and upper_pct > 50 and lower_pct < 25 and direction == "Bullish"
-    is_shooting_star = body_pct < 25 and upper_pct > 50 and lower_pct < 25 and direction == "Bearish"
-    is_inverted_hammer_bear = body_pct < 25 and lower_pct > 50 and upper_pct < 25 and direction == "Bearish"
-
-    return {
-        "direction": direction,
-        "body_pct": body_pct,
-        "upper_pct": upper_pct,
-        "lower_pct": lower_pct,
-        "is_doji": is_doji,
-        "is_hammer": is_hammer,
-        "is_inverted_hammer": is_inverted_hammer,
-        "is_shooting_star": is_shooting_star,
-        "is_inverted_hammer_bear": is_inverted_hammer_bear,
-    }
-
-def calculate_rsi(data, period=14):
-    delta = data["Close"].diff()
+def compute_rsi(data, period=14):
+    delta = data.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
 
-def safe_get_float(series):
-    if series.empty:
-        return None
-    val = series.iloc[0]
-    if isinstance(val, pd.Series):
+def safe_float(val):
+    # Dacă e un pd.Series cu un element, ia elementul
+    if hasattr(val, "iloc"):
+        val = val.iloc[0]
+    # Dacă e un pd.Series cu un item, folosește .item()
+    if hasattr(val, "item"):
         val = val.item()
-    if pd.isna(val):
-        return None
     return float(val)
 
 def analyze_ticker(ticker):
     try:
-        data = yf.download(ticker, interval="5m", period="1d", auto_adjust=False, progress=False)
-    except Exception as e:
-        return f"[red]{ticker}: Eroare la descărcare date ({e})[/red]"
+        df = yf.download(ticker, period="2d", interval=INTERVAL, progress=False, auto_adjust=False)
+        df.dropna(inplace=True)
 
-    if data.empty:
-        return f"[red]{ticker}: Nu există date[/red]"
+        if df.empty or len(df) < 20:
+            return ticker, "Date insuficiente"
 
-    data["MA20"] = data["Close"].rolling(window=20).mean()
-    data["RSI"] = calculate_rsi(data)
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
 
-    last = data.iloc[-1:]
+        open_price = safe_float(last["Open"])
+        close_price = safe_float(last["Close"])
+        high_price = safe_float(last["High"])
+        low_price = safe_float(last["Low"])
 
-    open_price = safe_get_float(last["Open"])
-    close_price = safe_get_float(last["Close"])
-    high = safe_get_float(last["High"])
-    low = safe_get_float(last["Low"])
-    ma20 = safe_get_float(last["MA20"])
-    rsi = safe_get_float(last["RSI"])
+        body = abs(close_price - open_price)
+        upper_shadow = high_price - max(close_price, open_price)
+        lower_shadow = min(close_price, open_price) - low_price
+        total_range = high_price - low_price if high_price != low_price else 1
 
-    if None in (open_price, close_price, high, low):
-        return f"[yellow]{ticker}: Date incomplete[/yellow]"
+        body_pct = (body / total_range) * 100
+        upper_pct = (upper_shadow / total_range) * 100
+        lower_pct = (lower_shadow / total_range) * 100
 
-    candle = classify_candle(open_price, close_price, high, low)
-    suggestion = []
-    signal = None
+        direction = "Bullish" if close_price > open_price else "Bearish"
 
-    # Sugestii bazate pe tipul lumânării
-    if candle["is_doji"]:
-        suggestion.append("⚖️ Doji - indecizie pe piață")
-    elif candle["is_hammer"]:
-        suggestion.append("🔨 Hammer bullish - posibilă inversare ascendentă")
-    elif candle["is_inverted_hammer"]:
-        suggestion.append("🔨 Inverted Hammer bullish - posibilă inversare ascendentă")
-    elif candle["is_shooting_star"]:
-        suggestion.append("🎯 Shooting Star - posibilă inversare descendentă")
-    elif candle["is_inverted_hammer_bear"]:
-        suggestion.append("🎯 Inverted Hammer bearish - posibilă inversare descendentă")
-    else:
-        if candle["direction"] == "Bullish" and candle["body_pct"] > 50:
-            suggestion.append("📈 BUY - Posibil trend ascendent")
-            play_buy_sound()
-            signal = "BUY"
-        elif candle["direction"] == "Bearish" and candle["body_pct"] > 50:
-            suggestion.append("📉 SELL - Posibil trend descendent")
-            play_sell_sound()
-            signal = "SELL"
+        ma20_series = df["Close"].rolling(window=20).mean()
+        ma20 = safe_float(ma20_series.iloc[-1])
+        below_ma20 = close_price < ma20
+
+        df["RSI"] = compute_rsi(df["Close"])
+        rsi = safe_float(df["RSI"].iloc[-1])
+
+        current_time = df.index[-1]
+        old_time = current_time - datetime.timedelta(minutes=LOOKBACK)
+
+        df_recent = df[df.index >= old_time]
+        if not df_recent.empty:
+            old_close = safe_float(df_recent["Close"].iloc[0])
+            price_change_pct = ((close_price - old_close) / old_close) * 100
+        else:
+            price_change_pct = 0
+
+        suggestion = []
+
+        if direction == "Bullish" and body_pct > 50:
+            if price_change_pct > 0.3:
+                suggestion.append("📈 BUY - Posibil trend ascendent")
+                play_buy_sound()
+            else:
+                suggestion.append("🔍 Posibilă revenire")
+
+        elif direction == "Bearish" and body_pct > 50:
+            if price_change_pct >= 1:
+                suggestion.append(f"⚠️ Bearish, dar +{price_change_pct:.2f}% în {LOOKBACK}m - posibil fals SELL")
+            elif price_change_pct > 0.3:
+                suggestion.append(f"📉 SELL (atenție: +{price_change_pct:.2f}% recent)")
+                play_sell_sound()
+            else:
+                suggestion.append("📉 SELL - Posibil trend descendent")
+                play_sell_sound()
         else:
             suggestion.append("🔍 Posibilă consolidare")
 
-    # Sugestii MA20
-    previous = data.iloc[-2:-1]
-    if not previous.empty and ma20 is not None:
-        prev_close = safe_get_float(previous["Close"])
-        prev_ma20 = safe_get_float(previous["MA20"])
-        if prev_close is not None and prev_ma20 is not None:
-            if prev_close < prev_ma20 and close_price > ma20:
-                suggestion.append("🔄 Cruce bullish peste MA20")
-            elif prev_close > prev_ma20 and close_price < ma20:
-                suggestion.append("🔄 Cruce bearish sub MA20")
-            else:
-                suggestion.append("✅ Deasupra MA20" if close_price > ma20 else "⚠️ Sub MA20")
-    else:
-        if ma20 is not None:
-            suggestion.append("✅ Deasupra MA20" if close_price > ma20 else "⚠️ Sub MA20")
+        if below_ma20:
+            suggestion.append("⚠️ Sub MA20")
+        else:
+            suggestion.append("✅ Peste MA20")
 
-    # RSI
-    if rsi is not None:
-        if rsi > 70:
-            suggestion.append("💡 RSI supra-cumpărat (>70)")
-        elif rsi < 30:
-            suggestion.append("💡 RSI supra-vândut (<30)")
-        elif 45 <= rsi <= 55:
-            suggestion.append("⚖️ RSI neutru (45-55)")
+        if rsi < 30:
+            suggestion.append("🟢 RSI scăzut (posibil BUY)")
+        elif rsi > 70:
+            suggestion.append("🔴 RSI ridicat (posibil SELL)")
         else:
             suggestion.append("RSI în zona normală")
 
-    suggest_text = " | ".join(suggestion)
-    timestamp = last.index[0]
-    final_text = f"{timestamp} -> {candle['direction']}, Corp: {candle['body_pct']}%, Umbre: ↑{candle['upper_pct']}% ↓{candle['lower_pct']}% | {suggest_text}"
+        text = (f"{current_time} -> {direction}, Corp: {body_pct:.2f}%, Umbre: ↑{upper_pct:.2f}% ↓{lower_pct:.2f}% | " +
+                " | ".join(suggestion))
 
-    if signal:
-        notify(f"{signal} - {ticker}", final_text)
+        if any("BUY" in s for s in suggestion):
+            show_notification(f"BUY Signal: {ticker}", text)
+        elif any("SELL" in s for s in suggestion):
+            show_notification(f"SELL Signal: {ticker}", text)
 
-    return final_text
-    
-def load_tickers_from_file(filename="tickers.txt"):
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            return [line.strip() for line in f if line.strip()]
+        return ticker.replace("-USD", ""), text
+
     except Exception as e:
-        console.log(f"[red]Eroare la citirea fișierului {filename}: {e}[/red]")
-        return []
+        return ticker, f"Eroare: {e}"
 
-def analyze_all():
-    tickers = load_tickers_from_file()
-    table = Table(title=f"Analiză Real-Time {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    table.add_column("Ticker", style="cyan", no_wrap=True)
-    table.add_column("Analiză", style="white")
+def show_notification(title, message):
+    try:
+        notification.notify(
+            title=title,
+            message=message,
+            app_name="StockBot",
+            timeout=5
+        )
+    except Exception as e:
+        print(f"Nu s-a putut trimite notificarea: {e}")
 
-    for ticker in tickers:
-        analysis = analyze_ticker(ticker)
-        table.add_row(ticker, analysis)
-
-    return table
-
-with Live(analyze_all(), refresh_per_second=0.2, screen=False) as live:
+def main():
     while True:
+        os.system("cls" if os.name == "nt" else "clear")
+        now = datetime.datetime.now(datetime.timezone.utc)
+        table = Table(title=f"Analiză Real-Time {now.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        table.add_column("Ticker", style="cyan", no_wrap=True)
+        table.add_column("Analiză", style="white")
+
+        tickers = load_tickers()
+        for ticker in tickers:
+            short_ticker, result = analyze_ticker(ticker)
+            table.add_row(short_ticker, result)
+
+        console.print(table)
         time.sleep(60)
-        live.update(analyze_all())
+
+if __name__ == "__main__":
+    main()

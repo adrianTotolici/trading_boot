@@ -1,0 +1,7 @@
+yfinance>=0.2.36
+pytz
+plyer
+rich
+colorama
+playsound==1.2.2 ; platform_system == "Windows"
+playsound==1.3.0 ; platform_system != "Windows"
