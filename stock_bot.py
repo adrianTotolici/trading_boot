@@ -173,7 +173,7 @@ def main():
             table.add_row(short_ticker, result)
 
         console.print(table)
-        time.sleep(60)
+        time.sleep(60*5)
 
 if __name__ == "__main__":
     main()
