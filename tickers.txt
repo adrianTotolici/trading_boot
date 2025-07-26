@@ -1,0 +1,7 @@
+BTC
+ETH
+BCH
+LTC
+ENS
+FLR
+MOVE
