@@ -43,7 +43,12 @@ def analyze_stock(ticker):
         trend = "DOWN"
     else:
         trend = "SIDEWAYS"
-
+        
+    # Calculeaza Stoch
+    low14 = df["Low"].rolling(window=14).min()
+    high14 = df["High"].rolling(window=14).max()
+    df["%K"] = 100 * (df["Close"] - low14) / (high14 - low14)
+    df["%D"] = df["%K"].rolling(window=3).mean()
 
     # Ultimele valori
     ma20 = float(df["MA20"].iloc[-1])
@@ -51,11 +56,27 @@ def analyze_stock(ticker):
     signal = float(df["Signal"].iloc[-1])
     rsi = float(df["RSI"].iloc[-1])
     price = float(df["Close"].iloc[-1])
+    stoch_k = float(df["%K"].iloc[-1])
+    stoch_d = float(df["%D"].iloc[-1])
 
     # Decizie simplificată
-    if trend == "UP" and macd > signal and rsi < 70 and price > ma20:
+    if (
+        trend == "UP" and
+        macd > signal and
+        rsi < 70 and
+        stoch_k > stoch_d and     # %K e peste %D → semnal pozitiv
+        stoch_k < 80 and
+        price > ma20
+    ):
         decision = "BUY"
-    elif trend == "DOWN" and macd < signal and rsi > 30 and price < ma20:
+    elif (
+        trend == "DOWN" and
+        macd < signal and
+        rsi > 30 and
+        stoch_k < stoch_d and     # %K e sub %D → semnal negativ
+        stoch_k > 20 and
+        price < ma20
+    ):
         decision = "SELL"
     else:
         decision = "HOLD"
@@ -64,15 +85,17 @@ def analyze_stock(ticker):
     play_sound(decision)
 
     return {
-        "Ticker": ticker,
-        "Trend": trend,
-        "Price": round(price, 2),
-        "MA20": round(ma20, 2),
-        "MACD": round(macd, 3),
-        "Signal": round(signal, 3),
-        "RSI": round(rsi, 1),
-        "Decision": decision
-    }
+    "Ticker": ticker,
+    "Trend": trend,
+    "Price": round(price, 2),
+    "MA20": round(ma20, 2),
+    "MACD": round(macd, 3),
+    "Signal": round(signal, 3),
+    "RSI": round(rsi, 1),
+    "STOCH_K": round(stoch_k, 1),
+    "STOCH_D": round(stoch_d, 1),
+    "Decision": decision
+}
     
 def play_sound(decision):
     if decision == "BUY":
@@ -93,7 +116,7 @@ def main_loop(file_path, interval_sec=120):
 
         df_results = pd.DataFrame(results)
         # Antet tabel colorat
-        header = f"{'Ticker':>6} {'Trend':>8} {'Price($)':>9} {'MA20($)':>9} {'MACD':>7} {'Signal':>8} {'RSI':>5} {'Decision':>9}"
+        header = f"{'Ticker':>6} {'Trend':>8} {'Price($)':>9} {'MA20($)':>9} {'MACD':>7} {'Signal':>8} {'RSI':>5} {'%K':>6} {'%D':>6} {'Decision':>9}"
         print("-" * len(header))
         print(header)
         print("-" * len(header))
@@ -108,9 +131,19 @@ def main_loop(file_path, interval_sec=120):
             else:
                 color = Style.RESET_ALL
         
-            line = f"{row['Ticker']:>6} {row['Trend']:>8} {row['Price']:>9.2f} {row['MA20']:>9.2f} {row['MACD']:>7.3f} {row['Signal']:>8.3f} {row['RSI']:>5.1f} {row['Decision']:>9}"
+            line = (
+                f"{row['Ticker']:>6} "
+                f"{row['Trend']:>8} "
+                f"{row['Price']:>9.2f} "
+                f"{row['MA20']:>9.2f} "
+                f"{row['MACD']:>7.3f} "
+                f"{row['Signal']:>8.3f} "
+                f"{row['RSI']:>5.1f} "
+                f"{row['STOCH_K']:>6.1f} "
+                f"{row['STOCH_D']:>6.1f} "
+                f"{row['Decision']:>9}"
+            )
             print(color + line)
-
 
         print(f"\nNext update in {interval_sec} seconds...\n")
         time.sleep(interval_sec)
