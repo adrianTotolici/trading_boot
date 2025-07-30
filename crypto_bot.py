@@ -253,7 +253,7 @@ def main_loop(file_path, interval_sec=60):
 
 
 if __name__ == "__main__":
-    ticker_file = "tickers.txt"
+    ticker_file = "tickers_crypto.txt"
     if os.path.exists(ticker_file):
         main_loop(ticker_file)
     else:
